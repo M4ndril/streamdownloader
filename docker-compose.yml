@@ -12,7 +12,9 @@ services:
     networks:
       - default
       - web
-      - proxy
+      - proxy     
 networks:
   web:
+    external: true
+  proxy:
     external: true
