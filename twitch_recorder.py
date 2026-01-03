@@ -170,10 +170,6 @@ with tab_monitor:
         if not has_active:
             st.caption("Nenhuma gravação ativa no momento.")
 
-        # Auto-refresh para mostrar atualizações do serviço
-        time.sleep(5)
-        st.rerun()
-
 # --- ABA 2: BIBLIOTECA DE GRAVAÇÕES ---
 with tab_recordings:
     st.subheader("📂 Arquivos Gravados")
@@ -225,3 +221,11 @@ with tab_recordings:
                         st.error(f"Erro ao excluir: {e}")
     else:
         st.info("Nenhuma gravação encontrada.")
+
+# --- RODAPÉ / REFRESH ---
+st.sidebar.markdown("---")
+auto_refresh = st.sidebar.checkbox("Auto-refresh (5s)", value=True)
+
+if auto_refresh:
+    time.sleep(5)
+    st.rerun()
