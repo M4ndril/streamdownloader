@@ -3,8 +3,16 @@ services:
   twitch-recorder:
     build: .
     container_name: twitch-recorder
-    ports:
-      - "8501:8501"
+    # Expose port 8501 ONLY to internal Docker networks (Traefik), not to the public internet
+    expose:
+      - "8501"
     volumes:
       - ./static:/app/static
     restart: unless-stopped
+    networks:
+      - default
+      - web
+      - proxy
+networks:
+  web:
+    external: true
