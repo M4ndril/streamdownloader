@@ -31,7 +31,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Configuração de Diretórios para Docker
-DATA_DIR = "data"
+# Usamos a pasta 'static' para que o Streamlit possa servir os arquivos diretamente
+DATA_DIR = "static"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
@@ -241,14 +242,10 @@ with tab_recordings:
                 c1.markdown(f"🎬 **{filename_only}**")
                 c1.caption(f"Tamanho: {size_mb:.1f} MB | Data: {date_str}")
                 
-                with open(f, "rb") as file_content:
-                    c2.download_button(
-                        label="⬇️ Baixar",
-                        data=file_content,
-                        file_name=filename_only,
-                        mime="video/mp4",
-                        key=f"dl_{f}"
-                    )
+                # Link Direto para Download (Mais eficiente que st.download_button para arquivos grandes)
+                # O arquivo está em 'static/', então a URL é 'app/static/filename'
+                download_url = f"app/static/{filename_only}"
+                c2.markdown(f'<a href="{download_url}" download="{filename_only}" style="text-decoration:none;"><button style="width:100%; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid rgba(250, 250, 250, 0.2); background-color: #262730; color: white; cursor: pointer;">⬇️ Baixar</button></a>', unsafe_allow_html=True)
                 
                 if c3.button("🗑️ Excluir", key=f"rm_{f}"):
                     try:
