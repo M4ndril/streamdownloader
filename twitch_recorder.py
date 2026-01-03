@@ -6,47 +6,39 @@ import os
 import time
 import sys
 import glob
+import psutil
 from datetime import datetime
 
 # Configuração da página
 st.set_page_config(page_title="Twitch Auto-Recorder", page_icon="🔴", layout="wide")
 
 # --- CSS HACKS ---
-# Remove botão de deploy, menu hamburger (opcional), footer e links dos cabeçalhos
 st.markdown("""
     <style>
-        /* Esconder botão de Deploy e Toolbar superior */
         .stDeployButton {display: none;}
         [data-testid="stToolbar"] {visibility: hidden;}
-        
-        /* Esconder links (âncoras) dos títulos */
         h1 a, h2 a, h3 a, h4 a, h5 a, h6 a {display: none !important;}
         h1, h2, h3, h4, h5, h6 {pointer-events: none;}
-        
-        /* Ajuste visual para os cards de canais */
-        div[data-testid="stVerticalBlock"] > div {
-            margin-bottom: 10px;
-        }
+        div[data-testid="stVerticalBlock"] > div { margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# Configuração de Diretórios para Docker
-# Usamos a pasta 'static' para que o Streamlit possa servir os arquivos diretamente
+# Configuração de Diretórios
 DATA_DIR = "static"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
-# Arquivo para salvar a lista de canais
 CHANNELS_FILE = os.path.join(DATA_DIR, "watchlist.json")
+RECORDINGS_FILE = os.path.join(DATA_DIR, "active_recordings.json")
 
-# Função para carregar canais (com migração de dados antiga -> nova)
+# --- FUNÇÕES DE PERSISTÊNCIA ---
+
 def load_channels():
     if os.path.exists(CHANNELS_FILE):
         with open(CHANNELS_FILE, "r") as f:
             try:
                 data = json.load(f)
-                # Migração: Se for lista de strings, converte para lista de objetos
-                if data and isinstance(data[0], str):
+                if data and isinstance(data[0], str): # Migração
                     new_data = [{"name": ch, "active": True} for ch in data]
                     save_channels(new_data)
                     return new_data
@@ -55,20 +47,54 @@ def load_channels():
                 return []
     return []
 
-# Função para salvar canais
 def save_channels(channels):
     with open(CHANNELS_FILE, "w") as f:
         json.dump(channels, f)
 
-# Inicializar estado da sessão
+def load_active_recordings():
+    if os.path.exists(RECORDINGS_FILE):
+        with open(RECORDINGS_FILE, "r") as f:
+            try:
+                return json.load(f) # Dict: {channel_name: {"pid": int, "filename": str, "start_time": str}}
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+def save_active_recordings(recordings):
+    with open(RECORDINGS_FILE, "w") as f:
+        json.dump(recordings, f)
+
+# --- FUNÇÕES DE PROCESSO ---
+
+def is_process_running(pid):
+    try:
+        p = psutil.Process(pid)
+        return p.is_running() and p.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return False
+
+def stop_process(pid):
+    try:
+        p = psutil.Process(pid)
+        p.terminate()
+        try:
+            p.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            p.kill()
+        return True
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False # Já morreu
+    except Exception as e:
+        print(f"Erro ao matar processo {pid}: {e}")
+        return False
+
+# --- UI PRINCIPAL ---
+
 if "monitoring" not in st.session_state:
     st.session_state.monitoring = False
-if "processes" not in st.session_state:
-    st.session_state.processes = {} # Dicionário: canal -> subprocesso
 
 st.title("🔴 Twitch Auto-Recorder")
 
-# Criar Abas
 tab_monitor, tab_recordings = st.tabs(["📡 Monitoramento", "📂 Gravações"])
 
 # --- ABA 1: MONITORAMENTO ---
@@ -78,25 +104,22 @@ with tab_monitor:
     with col_sidebar:
         st.subheader("📺 Gerenciar Canais")
         
-        # Adicionar Canal
         with st.form("add_channel_form", clear_on_submit=True):
             new_channel = st.text_input("Novo Canal", placeholder="Nome ou URL")
-            submitted = st.form_submit_button("Adicionar")
-            if submitted and new_channel:
-                channel_name = new_channel.split("twitch.tv/")[-1].split("/")[0].strip()
-                channels = load_channels()
-                # Verificar duplicatas
-                if not any(c['name'] == channel_name for c in channels):
-                    channels.append({"name": channel_name, "active": True})
-                    save_channels(channels)
-                    st.success(f"✅ {channel_name} adicionado!")
-                    st.rerun()
-                else:
-                    st.warning("Canal já existe.")
+            if st.form_submit_button("Adicionar"):
+                if new_channel:
+                    channel_name = new_channel.split("twitch.tv/")[-1].split("/")[0].strip()
+                    channels = load_channels()
+                    if not any(c['name'] == channel_name for c in channels):
+                        channels.append({"name": channel_name, "active": True})
+                        save_channels(channels)
+                        st.success(f"✅ {channel_name} adicionado!")
+                        st.rerun()
+                    else:
+                        st.warning("Canal já existe.")
 
         st.write("---")
         
-        # Listar Canais com Toggle Individual
         channels = load_channels()
         if channels:
             st.caption("Ative/Desative o monitoramento individualmente:")
@@ -104,17 +127,11 @@ with tab_monitor:
                 with st.container(border=True):
                     c1, c2 = st.columns([3, 1])
                     c1.markdown(f"**{ch_data['name']}**")
-                    
-                    # Toggle de Ativo/Inativo
                     is_active = c1.toggle("Monitorar", value=ch_data['active'], key=f"toggle_{i}")
-                    
-                    # Botão de Excluir
                     if c2.button("🗑️", key=f"del_{i}"):
                         channels.pop(i)
                         save_channels(channels)
                         st.rerun()
-                    
-                    # Salvar alteração do toggle se mudou
                     if is_active != ch_data['active']:
                         channels[i]['active'] = is_active
                         save_channels(channels)
@@ -124,10 +141,6 @@ with tab_monitor:
 
     with col_main:
         st.subheader("Painel de Controle")
-        
-        # Botão Mestre de Serviço
-        # O usuário pediu para iniciar/parar individualmente, mas precisamos de um "loop" rodando.
-        # Vamos deixar o serviço "Ligado" por padrão ou fácil de ligar.
         
         status_cols = st.columns([2, 1])
         if st.session_state.monitoring:
@@ -141,63 +154,63 @@ with tab_monitor:
                 st.session_state.monitoring = True
                 st.rerun()
 
-        st.info("ℹ️ O Serviço precisa estar **ATIVO** para processar os canais marcados como 'Monitorar'.")
         st.write("---")
         
-        # --- SEÇÃO DE GRAVAÇÕES ATIVAS ---
+        # --- SEÇÃO DE GRAVAÇÕES ATIVAS (PERSISTENTE) ---
         st.subheader("🔴 Gravações em Andamento")
         
-        # Verificar processos ativos e limpar os terminados
-        active_channels = list(st.session_state.processes.keys())
+        active_recs = load_active_recordings()
+        clean_needed = False
         has_active = False
-        
-        for ch in active_channels:
-            proc = st.session_state.processes[ch]
-            if proc.poll() is None: # Ainda rodando
+
+        # Iterar sobre cópia para poder modificar o original se necessário
+        for ch_name, info in list(active_recs.items()):
+            pid = info['pid']
+            
+            if is_process_running(pid):
                 has_active = True
                 box = st.container(border=True)
                 bc1, bc2 = box.columns([4, 1])
-                bc1.markdown(f"**Gravando:** `{ch}` (PID: {proc.pid})")
-                if bc2.button("Parar", key=f"stop_rec_{ch}", type="secondary"):
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                    del st.session_state.processes[ch]
-                    st.toast(f"Gravação de {ch} parada.")
+                bc1.markdown(f"**Gravando:** `{ch_name}` (PID: {pid})")
+                bc1.caption(f"Arquivo: {os.path.basename(info['filename'])}")
+                
+                if bc2.button("Parar", key=f"stop_rec_{ch_name}", type="secondary"):
+                    stop_process(pid)
+                    del active_recs[ch_name]
+                    save_active_recordings(active_recs)
+                    st.toast(f"Gravação de {ch_name} parada.")
                     st.rerun()
             else:
-                # Terminou sozinho
-                del st.session_state.processes[ch]
+                # Processo morreu sozinho (live acabou ou erro)
+                del active_recs[ch_name]
+                clean_needed = True
         
+        if clean_needed:
+            save_active_recordings(active_recs)
+            st.rerun()
+            
         if not has_active:
             st.caption("Nenhuma gravação ativa no momento.")
 
-        # --- LÓGICA DE MONITORAMENTO (Roda a cada refresh) ---
+        # --- LÓGICA DE MONITORAMENTO ---
         if st.session_state.monitoring:
-            
-            # Filtrar apenas canais ativos
             active_targets = [c['name'] for c in channels if c['active']]
             
-            if not active_targets:
-                st.warning("Serviço rodando, mas nenhum canal está marcado para monitorar.")
+            # Recarregar gravações para garantir estado atualizado
+            current_recs = load_active_recordings()
             
             for channel in active_targets:
                 # Pular se já estiver gravando
-                if channel in st.session_state.processes:
+                if channel in current_recs:
                     continue
                 
                 url = f"https://www.twitch.tv/{channel}"
                 try:
-                    # Verificar streams (rápido)
                     streams = streamlink.streams(url)
                     if streams:
-                        # ONLINE -> Iniciar Gravação
                         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                         filename = os.path.join(DATA_DIR, f"rec_{channel}_{timestamp}.mp4")
                         
-                        # Redirecionando stdout/stderr para DEVNULL
                         cmd = [sys.executable, "-m", "streamlink", url, "best", "-o", filename]
                         
                         kwargs = {}
@@ -210,14 +223,21 @@ with tab_monitor:
                             stderr=subprocess.DEVNULL,
                             **kwargs
                         )
-                        st.session_state.processes[channel] = proc
+                        
+                        # Salvar estado persistente
+                        current_recs[channel] = {
+                            "pid": proc.pid,
+                            "filename": filename,
+                            "start_time": timestamp
+                        }
+                        save_active_recordings(current_recs)
+                        
                         st.toast(f"🟢 {channel} está ONLINE! Gravando...")
-                        st.rerun() # Atualizar UI para mostrar o novo processo
+                        st.rerun()
                         
                 except Exception:
-                    pass # Ignorar erros de conexão temporários
+                    pass
             
-            # Aguardar e recarregar
             time.sleep(15)
             st.rerun()
 
@@ -225,7 +245,6 @@ with tab_monitor:
 with tab_recordings:
     st.subheader("📂 Arquivos Gravados")
     
-    # Listar arquivos mp4 na pasta de dados
     search_pattern = os.path.join(DATA_DIR, "rec_*.mp4")
     files = glob.glob(search_pattern)
     files.sort(key=os.path.getmtime, reverse=True)
@@ -233,21 +252,38 @@ with tab_recordings:
     if files:
         for f in files:
             filename_only = os.path.basename(f)
-            size_mb = os.path.getsize(f) / (1024 * 1024)
+            try:
+                size_mb = os.path.getsize(f) / (1024 * 1024)
+            except OSError:
+                size_mb = 0
+            
             timestamp = os.path.getmtime(f)
             date_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
             
+            # Verificar se este arquivo está sendo gravado agora
+            is_recording_now = False
+            active_recs = load_active_recordings()
+            for info in active_recs.values():
+                if os.path.abspath(info['filename']) == os.path.abspath(f):
+                    is_recording_now = True
+                    break
+            
             with st.container(border=True):
                 c1, c2, c3 = st.columns([3, 1, 1])
-                c1.markdown(f"🎬 **{filename_only}**")
+                
+                title = f"🎬 **{filename_only}**"
+                if is_recording_now:
+                    title += " (🔴 GRAVANDO...)"
+                
+                c1.markdown(title)
                 c1.caption(f"Tamanho: {size_mb:.1f} MB | Data: {date_str}")
                 
-                # Link Direto para Download (Mais eficiente que st.download_button para arquivos grandes)
-                # O arquivo está em 'static/', então a URL é 'app/static/filename'
+                # Botão de Download
                 download_url = f"app/static/{filename_only}"
                 c2.markdown(f'<a href="{download_url}" download="{filename_only}" style="text-decoration:none;"><button style="width:100%; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid rgba(250, 250, 250, 0.2); background-color: #262730; color: white; cursor: pointer;">⬇️ Baixar</button></a>', unsafe_allow_html=True)
                 
-                if c3.button("🗑️ Excluir", key=f"rm_{f}"):
+                # Botão de Excluir
+                if c3.button("🗑️ Excluir", key=f"rm_{f}", disabled=is_recording_now):
                     try:
                         os.remove(f)
                         st.toast(f"Arquivo {filename_only} excluído.")
