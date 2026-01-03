@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY twitch_recorder.py .
+COPY .streamlit .streamlit
 # Note: We do NOT copy the 'data' folder, as it should be a volume
 
 # Expose Streamlit port
