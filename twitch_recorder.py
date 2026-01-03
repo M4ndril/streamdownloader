@@ -1,10 +1,7 @@
 import streamlit as st
-import streamlink
-import subprocess
 import json
 import os
 import time
-import sys
 import glob
 import psutil
 from datetime import datetime
@@ -30,48 +27,33 @@ if not os.path.exists(DATA_DIR):
 
 CHANNELS_FILE = os.path.join(DATA_DIR, "watchlist.json")
 RECORDINGS_FILE = os.path.join(DATA_DIR, "active_recordings.json")
+SERVICE_STATE_FILE = os.path.join(DATA_DIR, "service_state.json")
 
 # --- FUNÇÕES DE PERSISTÊNCIA ---
 
-def load_channels():
-    if os.path.exists(CHANNELS_FILE):
-        with open(CHANNELS_FILE, "r") as f:
+def load_json(filepath, default):
+    if os.path.exists(filepath):
+        with open(filepath, "r") as f:
             try:
-                data = json.load(f)
-                if data and isinstance(data[0], str): # Migração
-                    new_data = [{"name": ch, "active": True} for ch in data]
-                    save_channels(new_data)
-                    return new_data
-                return data
+                return json.load(f)
             except json.JSONDecodeError:
-                return []
-    return []
+                return default
+    return default
+
+def save_json(filepath, data):
+    with open(filepath, "w") as f:
+        json.dump(data, f)
+
+def load_channels():
+    data = load_json(CHANNELS_FILE, [])
+    if data and isinstance(data[0], str): # Migração
+        new_data = [{"name": ch, "active": True} for ch in data]
+        save_json(CHANNELS_FILE, new_data)
+        return new_data
+    return data
 
 def save_channels(channels):
-    with open(CHANNELS_FILE, "w") as f:
-        json.dump(channels, f)
-
-def load_active_recordings():
-    if os.path.exists(RECORDINGS_FILE):
-        with open(RECORDINGS_FILE, "r") as f:
-            try:
-                return json.load(f) # Dict: {channel_name: {"pid": int, "filename": str, "start_time": str}}
-            except json.JSONDecodeError:
-                return {}
-    return {}
-
-def save_active_recordings(recordings):
-    with open(RECORDINGS_FILE, "w") as f:
-        json.dump(recordings, f)
-
-# --- FUNÇÕES DE PROCESSO ---
-
-def is_process_running(pid):
-    try:
-        p = psutil.Process(pid)
-        return p.is_running() and p.status() != psutil.STATUS_ZOMBIE
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-        return False
+    save_json(CHANNELS_FILE, channels)
 
 def stop_process(pid):
     try:
@@ -83,15 +65,12 @@ def stop_process(pid):
             p.kill()
         return True
     except (psutil.NoSuchProcess, psutil.ZombieProcess):
-        return False # Já morreu
+        return False
     except Exception as e:
         print(f"Erro ao matar processo {pid}: {e}")
         return False
 
 # --- UI PRINCIPAL ---
-
-if "monitoring" not in st.session_state:
-    st.session_state.monitoring = False
 
 st.title("🔴 Twitch Auto-Recorder")
 
@@ -142,104 +121,58 @@ with tab_monitor:
     with col_main:
         st.subheader("Painel de Controle")
         
+        # Controle do Serviço de Background
+        service_state = load_json(SERVICE_STATE_FILE, {"enabled": False})
+        
         status_cols = st.columns([2, 1])
-        if st.session_state.monitoring:
+        if service_state.get("enabled"):
             status_cols[0].success("✅ **SERVIÇO DE MONITORAMENTO: ATIVO**")
             if status_cols[1].button("⏹️ PARAR SERVIÇO"):
-                st.session_state.monitoring = False
+                service_state["enabled"] = False
+                save_json(SERVICE_STATE_FILE, service_state)
                 st.rerun()
         else:
             status_cols[0].warning("⚠️ **SERVIÇO DE MONITORAMENTO: PARADO**")
             if status_cols[1].button("▶️ INICIAR SERVIÇO", type="primary"):
-                st.session_state.monitoring = True
+                service_state["enabled"] = True
+                save_json(SERVICE_STATE_FILE, service_state)
                 st.rerun()
 
+        st.info("ℹ️ O Serviço roda em segundo plano. Você pode fechar esta janela.")
         st.write("---")
         
-        # --- SEÇÃO DE GRAVAÇÕES ATIVAS (PERSISTENTE) ---
+        # --- SEÇÃO DE GRAVAÇÕES ATIVAS ---
         st.subheader("🔴 Gravações em Andamento")
         
-        active_recs = load_active_recordings()
-        clean_needed = False
+        # Ler arquivo atualizado pelo serviço
+        active_recs = load_json(RECORDINGS_FILE, {})
         has_active = False
 
-        # Iterar sobre cópia para poder modificar o original se necessário
         for ch_name, info in list(active_recs.items()):
             pid = info['pid']
+            # O serviço limpa processos mortos, mas podemos checar aqui também para UI responsiva
             
-            if is_process_running(pid):
-                has_active = True
-                box = st.container(border=True)
-                bc1, bc2 = box.columns([4, 1])
-                bc1.markdown(f"**Gravando:** `{ch_name}` (PID: {pid})")
-                bc1.caption(f"Arquivo: {os.path.basename(info['filename'])}")
-                
-                if bc2.button("Parar", key=f"stop_rec_{ch_name}", type="secondary"):
-                    stop_process(pid)
-                    del active_recs[ch_name]
-                    save_active_recordings(active_recs)
-                    st.toast(f"Gravação de {ch_name} parada.")
-                    st.rerun()
-            else:
-                # Processo morreu sozinho (live acabou ou erro)
+            has_active = True
+            box = st.container(border=True)
+            bc1, bc2 = box.columns([4, 1])
+            bc1.markdown(f"**Gravando:** `{ch_name}` (PID: {pid})")
+            bc1.caption(f"Arquivo: {os.path.basename(info['filename'])}")
+            
+            if bc2.button("Parar", key=f"stop_rec_{ch_name}", type="secondary"):
+                # Matar processo diretamente
+                stop_process(pid)
+                # Remover do JSON para feedback imediato (o serviço limparia depois, mas assim é mais rápido)
                 del active_recs[ch_name]
-                clean_needed = True
+                save_json(RECORDINGS_FILE, active_recs)
+                st.toast(f"Gravação de {ch_name} parada.")
+                st.rerun()
         
-        if clean_needed:
-            save_active_recordings(active_recs)
-            st.rerun()
-            
         if not has_active:
             st.caption("Nenhuma gravação ativa no momento.")
 
-        # --- LÓGICA DE MONITORAMENTO ---
-        if st.session_state.monitoring:
-            active_targets = [c['name'] for c in channels if c['active']]
-            
-            # Recarregar gravações para garantir estado atualizado
-            current_recs = load_active_recordings()
-            
-            for channel in active_targets:
-                # Pular se já estiver gravando
-                if channel in current_recs:
-                    continue
-                
-                url = f"https://www.twitch.tv/{channel}"
-                try:
-                    streams = streamlink.streams(url)
-                    if streams:
-                        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        filename = os.path.join(DATA_DIR, f"rec_{channel}_{timestamp}.mp4")
-                        
-                        cmd = [sys.executable, "-m", "streamlink", url, "best", "-o", filename]
-                        
-                        kwargs = {}
-                        if sys.platform == "win32":
-                            kwargs['creationflags'] = 0x08000000
-                        
-                        proc = subprocess.Popen(
-                            cmd, 
-                            stdout=subprocess.DEVNULL, 
-                            stderr=subprocess.DEVNULL,
-                            **kwargs
-                        )
-                        
-                        # Salvar estado persistente
-                        current_recs[channel] = {
-                            "pid": proc.pid,
-                            "filename": filename,
-                            "start_time": timestamp
-                        }
-                        save_active_recordings(current_recs)
-                        
-                        st.toast(f"🟢 {channel} está ONLINE! Gravando...")
-                        st.rerun()
-                        
-                except Exception:
-                    pass
-            
-            time.sleep(15)
-            st.rerun()
+        # Auto-refresh para mostrar atualizações do serviço
+        time.sleep(5)
+        st.rerun()
 
 # --- ABA 2: BIBLIOTECA DE GRAVAÇÕES ---
 with tab_recordings:
@@ -262,7 +195,7 @@ with tab_recordings:
             
             # Verificar se este arquivo está sendo gravado agora
             is_recording_now = False
-            active_recs = load_active_recordings()
+            active_recs = load_json(RECORDINGS_FILE, {})
             for info in active_recs.values():
                 if os.path.abspath(info['filename']) == os.path.abspath(f):
                     is_recording_now = True
