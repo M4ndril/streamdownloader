@@ -36,11 +36,17 @@ def is_process_running(pid):
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return False
 
+import settings_manager
+
 def main():
     print("Starting Monitor Service...")
     
     while True:
         try:
+            # 0. Load Settings
+            settings = settings_manager.load_settings()
+            check_interval = settings.get("check_interval", 15)
+
             # 1. Check Service State
             state = load_json(SERVICE_STATE_FILE, {"enabled": False})
             
@@ -53,8 +59,11 @@ def main():
                 for ch_name, info in list(active_recs.items()):
                     if not is_process_running(info['pid']):
                         print(f"Process for {ch_name} (PID {info['pid']}) ended.")
+                        
                         del active_recs[ch_name]
                         dirty = True
+
+
                 
                 if dirty:
                     save_json(RECORDINGS_FILE, active_recs)
@@ -74,7 +83,10 @@ def main():
                         if streams:
                             print(f"Channel {channel} is ONLINE. Starting recording...")
                             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                            filename = os.path.join(DATA_DIR, f"rec_{channel}_{timestamp}.mp4")
+                            
+                            rec_format = settings.get("recording_format", "mp4")
+                            filename = os.path.join(DATA_DIR, f"rec_{channel}_{timestamp}.{rec_format}")
+
                             
                             cmd = [sys.executable, "-m", "streamlink", url, "best", "-o", filename]
                             
@@ -112,7 +124,27 @@ def main():
             print(f"Monitor Loop Error: {e}")
         
         # Wait before next cycle
-        time.sleep(15)
+        time.sleep(check_interval)
+
+import signal
+
+def cleanup(signum, frame):
+    print("\n🛑 Stopping Monitor Service...")
+    # Kill all active recording processes
+    active_recs = load_json(RECORDINGS_FILE, {})
+    for ch_name, info in active_recs.items():
+        pid = info.get('pid')
+        if pid:
+            try:
+                print(f"Killing recording for {ch_name} (PID {pid})...")
+                p = psutil.Process(pid)
+                p.terminate()
+            except:
+                pass
+    sys.exit(0)
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
     main()
+

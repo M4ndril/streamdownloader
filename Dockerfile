@@ -19,6 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY twitch_recorder.py .
 COPY monitor_service.py .
+COPY settings_manager.py .
+COPY uploader_service.py .
+
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY .streamlit .streamlit
 

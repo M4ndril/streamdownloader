@@ -5,6 +5,9 @@ import time
 import glob
 import psutil
 from datetime import datetime
+import settings_manager
+import uploader_service
+
 
 # Configuração da página
 st.set_page_config(page_title="Twitch Auto-Recorder", page_icon="🔴", layout="wide")
@@ -74,7 +77,8 @@ def stop_process(pid):
 
 st.title("🔴 Twitch Auto-Recorder")
 
-tab_monitor, tab_recordings = st.tabs(["📡 Monitoramento", "📂 Gravações"])
+tab_monitor, tab_recordings, tab_settings = st.tabs(["📡 Monitoramento", "📂 Gravações", "⚙️ Configurações"])
+
 
 # --- ABA 1: MONITORAMENTO ---
 with tab_monitor:
@@ -174,8 +178,11 @@ with tab_monitor:
 with tab_recordings:
     st.subheader("📂 Arquivos Gravados")
     
-    search_pattern = os.path.join(DATA_DIR, "rec_*.mp4")
-    files = glob.glob(search_pattern)
+    search_pattern = os.path.join(DATA_DIR, "rec_*.*")
+    all_files = glob.glob(search_pattern)
+    # Filter for supported extensions
+    files = [f for f in all_files if f.lower().endswith(('.mp4', '.ts', '.mkv'))]
+
     files.sort(key=os.path.getmtime, reverse=True)
     
     if files:
@@ -219,8 +226,147 @@ with tab_recordings:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao excluir: {e}")
+
+            # Botão de Upload com Expander
+            with st.expander(f"⬆️ Upload: {filename_only}"):
+                st.caption("Selecione o destino para enviar este vídeo:")
+                
+                target = st.selectbox("Destino", ["Archive.org", "YouTube"], key=f"sel_{f}")
+                
+                if target == "Archive.org":
+                    st.info("O arquivo será enviado para sua biblioteca do Archive.org.")
+                    meta_title = st.text_input("Título no Archive.org", value=filename_only, key=f"meta_t_{f}")
+                    
+                    if st.button("🚀 Iniciar Upload", key=f"up_{f}"):
+                        st.toast("Iniciando upload... aguarde.")
+                        
+                        settings = settings_manager.load_settings()
+                        uploader = uploader_service.UploaderService(settings)
+                        
+                        with st.spinner("Enviando para o Archive.org... Isso pode demorar dependendo do tamanho."):
+                            success, msg = uploader.upload_to_archive(f, metadata={'title': meta_title, 'mediatype': 'movies'})
+                            
+                            if success:
+                                st.success(msg)
+                                st.balloons()
+                            else:
+                                st.error(msg)
+
+                elif target == "YouTube":
+                    st.info("Envio direto para o YouTube via API.")
+                    
+                    yt_title = st.text_input("Título do Vídeo", value=filename_only, key=f"yt_t_{f}")
+                    yt_desc = st.text_area("Descrição", value=f"Gravado automaticamente de {os.path.basename(f)}", key=f"yt_d_{f}")
+                    yt_privacy = st.selectbox("Privacidade", ["private", "unlisted", "public"], index=0, key=f"yt_p_{f}")
+                    
+                    if st.button("🚀 Iniciar Upload YouTube", key=f"up_yt_{f}"):
+                        st.toast("Iniciando upload para YouTube... aguarde.")
+                         
+                        settings = settings_manager.load_settings()
+                        uploader = uploader_service.UploaderService(settings)
+                        
+                        with st.spinner("Enviando para o YouTube... Isso pode demorar."):
+                            success, msg = uploader.upload_to_youtube(f, title=yt_title, description=yt_desc, privacy_status=yt_privacy)
+                            
+                            if success:
+                                st.success(msg)
+                                st.balloons()
+                            else:
+                                st.error(msg)
+
+
     else:
         st.info("Nenhuma gravação encontrada.")
+
+# --- ABA 3: CONFIGURAÇÕES ---
+with tab_settings:
+    st.subheader("⚙️ Configurações do Sistema")
+    
+    settings = settings_manager.load_settings()
+    
+    st.markdown("### Geral")
+
+    new_interval = st.number_input("Intervalo de Monitoramento (segundos)", min_value=5, value=settings.get("check_interval", 15))
+    
+    current_format = settings.get("recording_format", "mp4")
+    new_format = st.selectbox("Formato de Gravação", ["mp4", "ts", "mkv"], index=["mp4", "ts", "mkv"].index(current_format))
+    
+    st.caption("Nota: 'ts' é mais seguro para lives (menos chance de corromper), mas arquivos ficam maiores. 'mp4' é mais compatível.")
+
+
+
+    st.markdown("### Upload - Arquivo e Credenciais")
+    
+    tab_archive, tab_youtube = st.tabs(["🏛️ Archive.org", "📹 YouTube"])
+    
+    with tab_archive:
+        st.caption("Obtenha suas chaves em: https://archive.org/account/s3.php")
+        
+        archive_cfg = settings.get("upload_targets", {}).get("archive", {})
+        bk_access = archive_cfg.get("access_key", "")
+        bk_secret = archive_cfg.get("secret_key", "")
+        
+        new_access = st.text_input("Access Key", value=bk_access, type="password")
+        new_secret = st.text_input("Secret Key", value=bk_secret, type="password")
+
+    with tab_youtube:
+        st.caption("1. Crie um projeto no Google Cloud Console.")
+        st.caption("2. Habilite a 'YouTube Data API v3'.")
+        st.caption("3. Crie credenciais OAuth 2.0 (Desktop App) e baixe o JSON.")
+        
+        yt_cfg = settings.get("upload_targets", {}).get("youtube", {})
+        current_secrets = yt_cfg.get("client_secrets", "")
+        has_token = bool(yt_cfg.get("token"))
+        
+        new_secrets = st.text_area("Cole o conteúdo do client_secrets.json aqui", value=current_secrets, height=150)
+        
+        if st.button("Autenticar com YouTube"):
+            if not new_secrets:
+                st.error("Cole o JSON de segredos primeiro.")
+            else:
+                uploader = uploader_service.UploaderService(settings)
+                token_json, msg = uploader.authenticate_youtube(new_secrets)
+                if token_json:
+                    st.success("Autenticado com sucesso!")
+                    # Save immediately to session state / temp settings so we can persist on save button
+                    if "upload_targets" not in settings: settings["upload_targets"] = {}
+                    if "youtube" not in settings["upload_targets"]: settings["upload_targets"]["youtube"] = {}
+                    
+                    settings["upload_targets"]["youtube"]["token"] = token_json
+                    # We also update the secrets in case they changed
+                    settings["upload_targets"]["youtube"]["client_secrets"] = new_secrets
+                    
+                    # Force save here to ensure token isn't lost if user doesn't click main save
+                    settings_manager.save_settings(settings)
+                    st.rerun()
+                else:
+                    st.error(msg)
+        
+        if has_token:
+            st.success("✅ Token válido salvo. Pronto para upload!")
+        else:
+            st.warning("⚠️ Não autenticado.")
+
+    
+    if st.button("💾 Salvar Configurações"):
+        # Update settings object
+        settings["check_interval"] = new_interval
+        settings["recording_format"] = new_format
+        
+        if "upload_targets" not in settings:
+
+            settings["upload_targets"] = {}
+        if "archive" not in settings["upload_targets"]:
+            settings["upload_targets"]["archive"] = {}
+            
+        settings["upload_targets"]["archive"]["access_key"] = new_access
+        settings["upload_targets"]["archive"]["secret_key"] = new_secret
+        
+        settings_manager.save_settings(settings)
+        st.success("Configurações salvas com sucesso! As alterações no intervalo entrarão em vigor no próximo ciclo do serviço.")
+        st.rerun()
+
+
 
 # --- RODAPÉ / REFRESH ---
 st.sidebar.markdown("---")

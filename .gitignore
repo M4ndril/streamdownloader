@@ -110,3 +110,6 @@ venv.bak/
 # Data directory
 static/
 watchlist.json
+client_secrets.json
+settings.json
+
