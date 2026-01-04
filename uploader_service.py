@@ -85,7 +85,8 @@ class UploaderService:
                 
         return creds
 
-    def authenticate_youtube(self, client_secrets_content):
+    def get_auth_url(self, client_secrets_content):
+        """Generate authorization URL for manual OAuth flow"""
         if not InstalledAppFlow:
             return None, "Google API libraries not installed."
             
@@ -96,14 +97,34 @@ class UploaderService:
             else:
                 client_config = client_secrets_content
 
-            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+            flow = InstalledAppFlow.from_client_config(
+                client_config, 
+                SCOPES,
+                redirect_uri='urn:ietf:wg:oauth:2.0:oob'  # Manual flow
+            )
             
-            # This will open a browser for auth
-            # In a real headless server we might need console strategy, 
-            # but for local usage run_local_server is fine.
-            creds = flow.run_local_server(port=0)
+            auth_url, _ = flow.authorization_url(prompt='consent')
             
-            # Return valid credentials to be saved
+            # Store flow temporarily (in a real app, use session state)
+            self._temp_flow = flow
+            
+            return auth_url, None
+            
+        except Exception as e:
+            return None, f"Failed to generate auth URL: {str(e)}"
+    
+    def authenticate_youtube_with_code(self, auth_code):
+        """Complete OAuth flow with authorization code from user"""
+        if not hasattr(self, '_temp_flow'):
+            return None, "No authentication flow in progress. Please generate auth URL first."
+            
+        try:
+            self._temp_flow.fetch_token(code=auth_code)
+            creds = self._temp_flow.credentials
+            
+            # Clean up temp flow
+            delattr(self, '_temp_flow')
+            
             return creds.to_json(), "Authentication successful."
             
         except Exception as e:

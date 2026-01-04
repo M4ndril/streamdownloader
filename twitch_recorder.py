@@ -320,27 +320,53 @@ with tab_settings:
         
         new_secrets = st.text_area("Cole o conteúdo do client_secrets.json aqui", value=current_secrets, height=150)
         
-        if st.button("Autenticar com YouTube"):
+        # Step 1: Generate Auth URL
+        if st.button("🔗 Gerar Link de Autenticação"):
             if not new_secrets:
                 st.error("Cole o JSON de segredos primeiro.")
             else:
                 uploader = uploader_service.UploaderService(settings)
-                token_json, msg = uploader.authenticate_youtube(new_secrets)
-                if token_json:
-                    st.success("Autenticado com sucesso!")
-                    # Save immediately to session state / temp settings so we can persist on save button
-                    if "upload_targets" not in settings: settings["upload_targets"] = {}
-                    if "youtube" not in settings["upload_targets"]: settings["upload_targets"]["youtube"] = {}
-                    
-                    settings["upload_targets"]["youtube"]["token"] = token_json
-                    # We also update the secrets in case they changed
-                    settings["upload_targets"]["youtube"]["client_secrets"] = new_secrets
-                    
-                    # Force save here to ensure token isn't lost if user doesn't click main save
-                    settings_manager.save_settings(settings)
+                auth_url, error = uploader.get_auth_url(new_secrets)
+                if auth_url:
+                    st.session_state['yt_auth_url'] = auth_url
+                    st.session_state['yt_uploader'] = uploader
                     st.rerun()
                 else:
-                    st.error(msg)
+                    st.error(error)
+        
+        # Step 2: Show URL and accept code
+        if 'yt_auth_url' in st.session_state:
+            st.success("✅ Link gerado! Clique abaixo para autorizar:")
+            st.markdown(f"### [🔐 Clique aqui para Autorizar]({st.session_state['yt_auth_url']})")
+            st.caption("Após autorizar, o Google mostrará um código. Cole-o abaixo:")
+            
+            auth_code = st.text_input("Código de Autorização", key="yt_auth_code")
+            
+            if st.button("✅ Confirmar Código"):
+                if not auth_code:
+                    st.error("Cole o código de autorização.")
+                else:
+                    uploader = st.session_state.get('yt_uploader')
+                    if uploader:
+                        token_json, msg = uploader.authenticate_youtube_with_code(auth_code)
+                        if token_json:
+                            st.success("Autenticado com sucesso!")
+                            # Save immediately
+                            if "upload_targets" not in settings: settings["upload_targets"] = {}
+                            if "youtube" not in settings["upload_targets"]: settings["upload_targets"]["youtube"] = {}
+                            
+                            settings["upload_targets"]["youtube"]["token"] = token_json
+                            settings["upload_targets"]["youtube"]["client_secrets"] = new_secrets
+                            
+                            settings_manager.save_settings(settings)
+                            
+                            # Clean up session state
+                            del st.session_state['yt_auth_url']
+                            del st.session_state['yt_uploader']
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
         
         if has_token:
             st.success("✅ Token válido salvo. Pronto para upload!")
