@@ -336,9 +336,17 @@ with tab_settings:
         
         # Step 2: Show URL and accept code
         if 'yt_auth_url' in st.session_state:
-            st.success("✅ Link gerado! Clique abaixo para autorizar:")
-            st.markdown(f"### [🔐 Clique aqui para Autorizar]({st.session_state['yt_auth_url']})")
+            st.success("✅ Link gerado! Clique no botão abaixo para autorizar:")
+            
+            # Show clickable button
+            st.link_button("🔐 Autorizar no Google", st.session_state['yt_auth_url'], use_container_width=True)
+            
+            # Also show URL as text for copy-paste if needed
+            with st.expander("📋 Ou copie o link manualmente"):
+                st.code(st.session_state['yt_auth_url'], language=None)
+            
             st.caption("Após autorizar, o Google mostrará um código. Cole-o abaixo:")
+
             
             auth_code = st.text_input("Código de Autorização", key="yt_auth_code")
             
