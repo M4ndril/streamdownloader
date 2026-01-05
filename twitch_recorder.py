@@ -8,6 +8,43 @@ from datetime import datetime
 import settings_manager
 import uploader_service
 
+# --- OAUTH CALLBACK HANDLER ---
+# This must be at the top to catch Google's redirect
+query_params = st.query_params
+if 'code' in query_params and 'yt_uploader' in st.session_state:
+    # Google redirected back with auth code
+    auth_code = query_params['code']
+    uploader = st.session_state.get('yt_uploader')
+    
+    if uploader:
+        token_json, msg = uploader.authenticate_youtube_with_code(auth_code)
+        if token_json:
+            # Save token
+            settings = settings_manager.load_settings()
+            if "upload_targets" not in settings: settings["upload_targets"] = {}
+            if "youtube" not in settings["upload_targets"]: settings["upload_targets"]["youtube"] = {}
+            
+            settings["upload_targets"]["youtube"]["token"] = token_json
+            if 'yt_client_secrets' in st.session_state:
+                settings["upload_targets"]["youtube"]["client_secrets"] = st.session_state['yt_client_secrets']
+            
+            settings_manager.save_settings(settings)
+            
+            # Clean up
+            del st.session_state['yt_uploader']
+            if 'yt_client_secrets' in st.session_state:
+                del st.session_state['yt_client_secrets']
+            
+            # Clear query params and show success
+            st.query_params.clear()
+            st.success("✅ Autenticação concluída com sucesso!")
+            st.balloons()
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.error(f"Erro na autenticação: {msg}")
+            st.query_params.clear()
+
 
 # Configuração da página
 st.set_page_config(page_title="Twitch Auto-Recorder", page_icon="🔴", layout="wide")
@@ -325,55 +362,21 @@ with tab_settings:
             if not new_secrets:
                 st.error("Cole o JSON de segredos primeiro.")
             else:
+                # Get current page URL for redirect
+                # Streamlit doesn't expose full URL easily, so we construct it
+                # User needs to configure this in Google Cloud Console
+                redirect_uri = "https://gravador.quimerastudio.com.br/"
+                
                 uploader = uploader_service.UploaderService(settings)
-                auth_url, error = uploader.get_auth_url(new_secrets)
+                auth_url, error = uploader.get_auth_url(new_secrets, redirect_uri)
                 if auth_url:
-                    st.session_state['yt_auth_url'] = auth_url
                     st.session_state['yt_uploader'] = uploader
-                    st.rerun()
+                    st.session_state['yt_client_secrets'] = new_secrets
+                    st.success("✅ Link gerado! Clique no botão abaixo:")
+                    st.link_button("🔐 Autorizar no Google", auth_url, use_container_width=True)
+                    st.info("Após autorizar, você será redirecionado de volta automaticamente.")
                 else:
                     st.error(error)
-        
-        # Step 2: Show URL and accept code
-        if 'yt_auth_url' in st.session_state:
-            st.success("✅ Link gerado! Clique no botão abaixo para autorizar:")
-            
-            # Show clickable button
-            st.link_button("🔐 Autorizar no Google", st.session_state['yt_auth_url'], use_container_width=True)
-            
-            # Also show URL as text for copy-paste if needed
-            with st.expander("📋 Ou copie o link manualmente"):
-                st.code(st.session_state['yt_auth_url'], language=None)
-            
-            st.caption("Após autorizar, o Google mostrará um código. Cole-o abaixo:")
-
-            
-            auth_code = st.text_input("Código de Autorização", key="yt_auth_code")
-            
-            if st.button("✅ Confirmar Código"):
-                if not auth_code:
-                    st.error("Cole o código de autorização.")
-                else:
-                    uploader = st.session_state.get('yt_uploader')
-                    if uploader:
-                        token_json, msg = uploader.authenticate_youtube_with_code(auth_code)
-                        if token_json:
-                            st.success("Autenticado com sucesso!")
-                            # Save immediately
-                            if "upload_targets" not in settings: settings["upload_targets"] = {}
-                            if "youtube" not in settings["upload_targets"]: settings["upload_targets"]["youtube"] = {}
-                            
-                            settings["upload_targets"]["youtube"]["token"] = token_json
-                            settings["upload_targets"]["youtube"]["client_secrets"] = new_secrets
-                            
-                            settings_manager.save_settings(settings)
-                            
-                            # Clean up session state
-                            del st.session_state['yt_auth_url']
-                            del st.session_state['yt_uploader']
-                            st.rerun()
-                        else:
-                            st.error(msg)
 
         
         if has_token:

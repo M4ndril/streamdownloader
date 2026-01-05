@@ -85,7 +85,7 @@ class UploaderService:
                 
         return creds
 
-    def get_auth_url(self, client_secrets_content):
+    def get_auth_url(self, client_secrets_content, redirect_uri):
         """Generate authorization URL for manual OAuth flow"""
         if not InstalledAppFlow:
             return None, "Google API libraries not installed."
@@ -100,7 +100,7 @@ class UploaderService:
             flow = InstalledAppFlow.from_client_config(
                 client_config, 
                 SCOPES,
-                redirect_uri='urn:ietf:wg:oauth:2.0:oob'  # Manual flow
+                redirect_uri=redirect_uri
             )
             
             auth_url, _ = flow.authorization_url(prompt='consent')
