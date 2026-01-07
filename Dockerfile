@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     supervisor \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

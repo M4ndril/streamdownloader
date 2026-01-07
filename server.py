@@ -8,6 +8,10 @@ import glob
 import json
 import psutil
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo # Fallback for older python if needed, though 3.11 has it
 import settings_manager
 import monitor_service
 import uploader_service
@@ -126,7 +130,17 @@ def get_recordings():
         try:
             size_mb = os.path.getsize(video_path) / (1024 * 1024)
             timestamp = os.path.getmtime(video_path)
-            date_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
+            # Timezone Conversion
+            dt_utc = datetime.fromtimestamp(timestamp)
+            # Assuming docker system time might be UTC, but fromtimestamp returns local. 
+            # Best is to awareness:
+            # dt = datetime.fromtimestamp(timestamp, ZoneInfo("UTC"))
+            # But os.path.getmtime returns epoch.
+            # fromtimestamp() returns local time if no tz. If docker is UTC, it's UTC.
+            # Let's be explicit: treat as UTC then convert to BRT.
+            dt_utc = datetime.fromtimestamp(timestamp, ZoneInfo("UTC"))
+            dt_br = dt_utc.astimezone(ZoneInfo("America/Sao_Paulo"))
+            date_str = dt_br.strftime('%d/%m/%Y %H:%M')
         except OSError:
             size_mb = 0
             date_str = "Unknown"
@@ -166,7 +180,9 @@ def get_recordings():
         try:
             size_mb = os.path.getsize(f) / (1024 * 1024)
             timestamp = os.path.getmtime(f)
-            date_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
+            dt_utc = datetime.fromtimestamp(timestamp, ZoneInfo("UTC"))
+            dt_br = dt_utc.astimezone(ZoneInfo("America/Sao_Paulo"))
+            date_str = dt_br.strftime('%d/%m/%Y %H:%M')
         except OSError:
             size_mb = 0
             date_str = ""
