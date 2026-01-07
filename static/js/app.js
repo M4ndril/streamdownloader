@@ -164,10 +164,15 @@ async function addChannel(e) {
 
     const name = val.split('twitch.tv/').pop().split('/')[0];
 
-    await API.addChannel(name);
-    input.value = '';
-    loadChannels();
-    showToast("Canal adicionado!");
+    const res = await API.addChannel(name);
+
+    if (res.error) {
+        alert("Erro ao adicionar canal: " + res.error);
+    } else {
+        input.value = '';
+        loadChannels();
+        showToast("Canal adicionado!");
+    }
 }
 
 async function deleteChannelItem(name) {

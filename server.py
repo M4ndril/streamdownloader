@@ -38,6 +38,19 @@ RECORDINGS_FILE = os.path.join(DATA_DIR, "active_recordings.json")
 SERVICE_STATE_FILE = os.path.join(DATA_DIR, "service_state.json")
 
 # --- Helpers ---
+def load_json(filepath, default):
+    if os.path.exists(filepath):
+        with open(filepath, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return default
+    return default
+
+def save_json(filepath, data):
+    with open(filepath, "w") as f:
+        json.dump(data, f)
+
 def has_ffmpeg():
     from shutil import which
     return which("ffmpeg") is not None
