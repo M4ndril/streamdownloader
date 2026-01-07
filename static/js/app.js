@@ -341,9 +341,9 @@ async function submitUpload() {
         const title = $('#upload-title-archive').value;
         const res = await API.uploadArchive(fileToUpload, title);
         if (res.status === 'success') {
-            alert("Upload Concluído: " + res.message);
+            showToast("Upload Archive.org Concluído!");
         } else {
-            alert("Erro no Upload: " + res.error);
+            showToast("Erro no Upload: " + res.error);
         }
     } else {
         // YouTube
@@ -355,9 +355,9 @@ async function submitUpload() {
         };
         const res = await API.uploadYoutube(data);
         if (res.status === 'success') {
-            alert("Upload YouTube Concluído: " + res.message);
+            showToast("Upload YouTube Concluído!");
         } else {
-            alert("Erro YouTube: " + res.error);
+            showToast("Erro YouTube: " + res.error);
         }
     }
     refreshRecordings(); // Clear status
