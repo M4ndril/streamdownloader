@@ -98,11 +98,16 @@ def main():
                                     # OR for Twitch it might be directly in plugin payload. 
                                     # Let's try to extract safely.
                                     if "metadata" in data and data["metadata"]:
-                                         meta_info["title"] = data["metadata"].get("title", "No Title")
-                                         meta_info["game"] = data["metadata"].get("game", "Unknown Game")
-                                         meta_info["author"] = data["metadata"].get("author", channel)
+                                         meta = data["metadata"]
+                                         meta_info["title"] = meta.get("title", "No Title")
+                                         # Try multiple keys for game/category
+                                         meta_info["game"] = meta.get("game") or meta.get("category") or meta.get("game_name") or "Unknown Game"
+                                         meta_info["author"] = meta.get("author", channel)
+                                         print(f"Metadata found: {meta_info}")
                                     else:
-                                        # Fallback
+                                        # Iterate over streams if metadata key is missing (older streamlink versions?)
+                                        # But --json usually returns metadata at top level now.
+                                        print(f"No 'metadata' key in JSON: {data.keys()}")
                                         meta_info["title"] = "Unknown Title"
                                         meta_info["game"] = "Unknown Game"
                             except Exception as e:

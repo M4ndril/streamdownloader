@@ -309,8 +309,9 @@ button {
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     overflow: hidden;
-    position: relative;
-    transition: transform 0.2s;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .rec-card:hover {
@@ -363,6 +364,9 @@ button {
 
 .rec-info {
     padding: 1rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .rec-title {
@@ -390,10 +394,14 @@ button {
 }
 
 .rec-links {
-    margin-top: 0.75rem;
+    margin-top: auto;
+    /* Push links to bottom of info section if needed */
     display: flex;
     gap: 0.5rem;
+    padding-top: 0.75rem;
 }
+
+
 
 .upload-link-btn {
     display: inline-flex;
