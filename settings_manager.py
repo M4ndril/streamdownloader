@@ -20,7 +20,7 @@ DEFAULT_SETTINGS = {
     }
 }
 
-DATA_DIR = "static"
+DATA_DIR = "data"
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 def load_settings():

@@ -8,7 +8,7 @@ import streamlink
 from datetime import datetime
 
 # Configuração de Diretórios
-DATA_DIR = "static"
+DATA_DIR = "data"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
