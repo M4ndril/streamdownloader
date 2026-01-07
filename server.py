@@ -419,7 +419,8 @@ running_flows = {}
 @app.post("/api/auth/youtube/init")
 async def init_youtube_auth(payload: dict):
     client_secrets = payload.get("client_secrets")
-    redirect_uri = "http://localhost:8501/auth/callback" # Changed for local dev
+    # HARDCODED FOR PRODUCTION as requested
+    redirect_uri = "https://gravador.quimerastudio.com.br/auth/callback" 
     
     settings = settings_manager.load_settings()
     uploader = uploader_service.UploaderService(settings)
