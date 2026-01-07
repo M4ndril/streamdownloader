@@ -27,7 +27,7 @@ COPY static static
 COPY templates templates
 
 # Create directory for data
-RUN mkdir -p static
+RUN mkdir -p static && mkdir -p data
 
 # Expose FastAPI port
 EXPOSE 8501

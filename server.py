@@ -16,10 +16,15 @@ import sys
 
 app = FastAPI()
 
-# Mount Static Files
+# Mount Static Files (App Assets: CSS, JS)
 if not os.path.exists("static"):
     os.makedirs("static")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Mount Data Files (Recordings, Thumbnails)
+if not os.path.exists("data"):
+    os.makedirs("data")
+app.mount("/files", StaticFiles(directory="data"), name="files")
 
 # Templates
 if not os.path.exists("templates"):
@@ -27,7 +32,7 @@ if not os.path.exists("templates"):
 templates = Jinja2Templates(directory="templates")
 
 # Paths
-DATA_DIR = "static"
+DATA_DIR = "data"
 CHANNELS_FILE = os.path.join(DATA_DIR, "watchlist.json")
 RECORDINGS_FILE = os.path.join(DATA_DIR, "active_recordings.json")
 SERVICE_STATE_FILE = os.path.join(DATA_DIR, "service_state.json")
@@ -50,7 +55,7 @@ def generate_thumbnail(video_path):
         os.makedirs(thumb_dir)
         
     if os.path.exists(thumb_path):
-        return f"/static/thumbnails/{thumb_name}"
+        return f"/files/thumbnails/{thumb_name}"
         
     # Generate
     try:
@@ -65,7 +70,7 @@ def generate_thumbnail(video_path):
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
         
         if os.path.exists(thumb_path):
-            return f"/static/thumbnails/{thumb_name}"
+            return f"/files/thumbnails/{thumb_name}"
     except Exception as e:
         print(f"Error generating thumbnail for {filename}: {e}")
         
@@ -104,7 +109,7 @@ def get_recordings():
         result.append({
             "filename": filename_only,
             "path": f, # Absolute path for internal use
-            "url": f"/static/{filename_only}",
+            "url": f"/files/{filename_only}",
             "thumbnail": thumb_url,
             "size_mb": round(size_mb, 1),
             "date": date_str,
