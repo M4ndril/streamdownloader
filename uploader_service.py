@@ -80,7 +80,15 @@ class UploaderService:
             return False, "File not found."
 
         filename = os.path.basename(file_path)
-        identifier = filename.replace(".", "_").replace(" ", "_").lower()[:50] # Limit length
+        # Ensure unique identifier for Archive.org
+        import time
+        unique_suffix = int(time.time())
+        # If filename is generic "video.mp4", prepend "stream_recording_" or similar if possible, 
+        # but easier to just use "stream_rec_" + suffix
+        # The user's files are now "video.mp4" inside unique folders.
+        # We should try to use the TITLE if available or just a timestamped name.
+        # Let's generate: "stream_rec_{timestamp}"
+        identifier = f"stream_rec_{unique_suffix}"
         
         if not metadata:
             metadata = {'title': filename, 'mediatype': 'movies'}
