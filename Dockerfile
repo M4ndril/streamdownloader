@@ -17,16 +17,20 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY twitch_recorder.py .
+# Copy application code
+COPY server.py .
+COPY run_app.py .
 COPY monitor_service.py .
 COPY settings_manager.py .
 COPY uploader_service.py .
+COPY static static
+COPY templates templates
 
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY .streamlit .streamlit
+# Create directory for data
+RUN mkdir -p static
 
-# Expose Streamlit port
+# Expose FastAPI port
 EXPOSE 8501
 
-# Run supervisor (which runs streamlit and the monitor service)
-CMD ["/usr/bin/supervisord"]
+# Run the unified application runner
+CMD ["python", "run_app.py"]

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streamlink Recorder Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i data-lucide="video"></i>
+                <span>Recorder</span>
+            </div>
+
+            <nav>
+                <button class="nav-item active" onclick="showView('monitor')" data-target="monitor">
+                    <i data-lucide="activity"></i> Monitor
+                </button>
+                <button class="nav-item" onclick="showView('recordings')" data-target="recordings">
+                    <i data-lucide="film"></i> Gravações
+                </button>
+                <button class="nav-item" onclick="showView('settings')" data-target="settings">
+                    <i data-lucide="settings"></i> Configurações
+                </button>
+            </nav>
+
+            <div class="status-card" id="service-status-card">
+                <div class="status-header">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Serviço Parado</span>
+                </div>
+                <button id="toggle-service-btn" onclick="toggleService()">Iniciar</button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- VIEW: MONITOR -->
+            <div id="view-monitor" class="view-section active">
+                <header>
+                    <h1>Monitoramento</h1>
+                    <p>Gerencie os canais observados e veja gravações em andamento.</p>
+                </header>
+
+                <div class="grid-layout">
+                    <!-- Channels Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Canais</h2>
+                            <form id="add-channel-form" onsubmit="addChannel(event)">
+                                <input type="text" id="new-channel-input" placeholder="twitch.tv/canal" required>
+                                <button type="submit" class="btn-icon"><i data-lucide="plus"></i></button>
+                            </form>
+                        </div>
+                        <div class="card-body">
+                            <ul id="channels-list" class="list-group">
+                                <!-- Channels injected via JS -->
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Active Recordings Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Gravando Agora</h2>
+                        </div>
+                        <div class="card-body">
+                            <ul id="active-recordings-list" class="list-group">
+                                <!-- Active recordings injected via JS -->
+                                <div class="empty-state">Nenhuma gravação ativa.</div>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: RECORDINGS -->
+            <div id="view-recordings" class="view-section">
+                <header>
+                    <h1>Galeria de Gravações</h1>
+                    <button class="btn-secondary" onclick="refreshRecordings()"><i data-lucide="refresh-cw"></i>
+                        Atualizar</button>
+                </header>
+
+                <div class="recordings-grid" id="recordings-grid">
+                    <!-- Recordings injected via JS -->
+                </div>
+            </div>
+
+            <!-- VIEW: SETTINGS -->
+            <div id="view-settings" class="view-section">
+                <header>
+                    <h1>Configurações</h1>
+                </header>
+
+                <div class="card settings-card">
+                    <div class="form-group">
+                        <label>Intervalo de Verificação (segundos)</label>
+                        <input type="number" id="setting-interval" min="5" value="15">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Formato de Gravação</label>
+                        <select id="setting-format">
+                            <option value="mp4">MP4</option>
+                            <option value="ts">TS (MPEG-TS)</option>
+                            <option value="mkv">MKV</option>
+                        </select>
+                        <small>TS é mais seguro contra corrupção. MP4 é mais compatível.</small>
+                    </div>
+
+                    <hr style="border-color: var(--border); margin: 2rem 0;">
+
+                    <h3>Upload: Archive.org</h3>
+                    <div class="form-group">
+                        <label>Access Key</label>
+                        <input type="password" id="setting-archive-access">
+                    </div>
+                    <div class="form-group">
+                        <label>Secret Key</label>
+                        <input type="password" id="setting-archive-secret">
+                    </div>
+
+                    <hr style="border-color: var(--border); margin: 2rem 0;">
+
+                    <h3>Upload: YouTube</h3>
+                    <div class="form-group">
+                        <label>Client Secrets JSON (Conteúdo)</label>
+                        <textarea id="setting-yt-secrets" rows="5" placeholder='{"installed":{...}}'
+                            style="width:100%; background:var(--bg-app); border:1px solid var(--border); color:var(--text-primary); padding:0.5rem;"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn-secondary" onclick="initYouTubeAuth()">🔐 Autorizar no YouTube
+                            (Google)</button>
+                        <small id="yt-auth-status">Token não verificado.</small>
+                    </div>
+
+
+                    <button class="btn-primary" style="margin-top: 1rem;" onclick="saveSettings()">💾 Salvar
+                        Configurações</button>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- UPLOAD MODAL -->
+    <div id="upload-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Enviar Gravação</h3>
+            <p id="modal-filename" style="margin-bottom: 1rem; color: var(--accent);">filename.mp4</p>
+
+            <div class="form-group">
+                <label>Destino</label>
+                <select id="upload-target" onchange="toggleUploadFields()">
+                    <option value="archive">Archive.org</option>
+                    <option value="youtube">YouTube</option>
+                </select>
+            </div>
+
+            <!-- Archive Fields -->
+            <div id="fields-archive">
+                <div class="form-group">
+                    <label>Título (Archive.org)</label>
+                    <input type="text" id="upload-title-archive">
+                </div>
+            </div>
+
+            <!-- YouTube Fields -->
+            <div id="fields-youtube" style="display:none;">
+                <div class="form-group">
+                    <label>Título (YouTube)</label>
+                    <input type="text" id="upload-title-yt">
+                </div>
+                <div class="form-group">
+                    <label>Descrição</label>
+                    <textarea id="upload-desc-yt" rows="3"
+                        style="width:100%; background:var(--bg-app); border:1px solid var(--border); color:var(--text-primary); padding:0.5rem;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Privacidade</label>
+                    <select id="upload-privacy-yt">
+                        <option value="private">Privado</option>
+                        <option value="unlisted">Não Listado</option>
+                        <option value="public">Público</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+                <button class="btn-primary" onclick="submitUpload()">Iniciar Upload</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MOBILE BOTTOM NAVIGATION -->
+    <nav class="mobile-nav">
+        <button class="nav-item active" onclick="showView('monitor')" data-target="monitor">
+            <i data-lucide="activity"></i>
+            <span>Monitor</span>
+        </button>
+        <button class="nav-item" onclick="showView('recordings')" data-target="recordings">
+            <i data-lucide="film"></i>
+            <span>Gravações</span>
+        </button>
+        <button class="nav-item" onclick="showView('settings')" data-target="settings">
+            <i data-lucide="settings"></i>
+            <span>Config</span>
+        </button>
+    </nav>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="toast hidden">Notificação</div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+
+</html>

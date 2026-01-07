@@ -1,25 +1,14 @@
-import psutil
 import sys
-import time
 import subprocess
-
-
-def kill_proc_tree(pid, including_parent=True):    
-    try:
-        parent = psutil.Process(pid)
-        for child in parent.children(recursive=True):
-            child.kill()
-        if including_parent:
-            parent.kill()
-    except psutil.NoSuchProcess:
-        pass
+import time
+import os
 
 def main():
-    print("🚀 Starting Twitch Recorder App (Local Mode)...")
+    print("🚀 Starting Streamlink Recorder (FastAPI)...")
     
     # Define commands
-    # Use 'streamlit run' via module to avoid path issues
-    cmd_streamlit = [sys.executable, "-m", "streamlit", "run", "twitch_recorder.py", "--server.port=8501"]
+    # Use 'uvicorn' via module
+    cmd_server = [sys.executable, "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8501", "--reload", "--no-access-log"]
     cmd_monitor = [sys.executable, "monitor_service.py"]
 
     processes = []
@@ -30,22 +19,23 @@ def main():
         p_monitor = subprocess.Popen(cmd_monitor)
         processes.append(p_monitor)
 
-        # Start Streamlit
-        print("Starting Streamlit UI...")
-        p_streamlit = subprocess.Popen(cmd_streamlit)
-        processes.append(p_streamlit)
+        # Start Web Server
+        print("Starting Web Server...")
+        p_server = subprocess.Popen(cmd_server)
+        processes.append(p_server)
 
-        print("\n✅ All services started! Press Ctrl+C to stop.")
+        print("\n✅ All services started!")
+        print("➡️  Open http://localhost:8000 in your browser.")
+        print("Press Ctrl+C to stop.")
         
         # Wait for processes
         while True:
             time.sleep(1)
-            # Check if any process died
             if p_monitor.poll() is not None:
-                print("⚠️ Monitor Service died! Exiting...")
+                print("⚠️ Monitor Service died!")
                 break
-            if p_streamlit.poll() is not None:
-                print("⚠️ Streamlit UI died! Exiting...")
+            if p_server.poll() is not None:
+                print("⚠️ Web Server died!")
                 break
 
     except KeyboardInterrupt:
@@ -53,8 +43,7 @@ def main():
     finally:
         for p in processes:
             if p.poll() is None:
-                print(f"Killing process {p.pid} and its children...")
-                kill_proc_tree(p.pid)
+                p.terminate()
         print("👋 Bye!")
 
 if __name__ == "__main__":

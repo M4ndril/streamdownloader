@@ -108,7 +108,12 @@ venv.bak/
 *.ts
 
 # Data directory
-static/
+# Data directory
+static/rec_*
+static/*.json
+static/*.mp4
+static/*.mkv
+static/*.ts
 watchlist.json
 client_secrets.json
 settings.json

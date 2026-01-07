@@ -4,6 +4,8 @@ internetarchive
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
-
-
 psutil
+fastapi
+uvicorn
+jinja2
+python-multipart
