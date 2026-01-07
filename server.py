@@ -128,25 +128,31 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 # API: Status & Uploads
+# API: Status & Uploads
 @app.get("/api/status")
 async def get_status():
-    service_state = load_json(SERVICE_STATE_FILE, {"enabled": False})
-    active_recs = load_json(RECORDINGS_FILE, {})
-    
-    # Clean up zombie records visually
-    clean_recs = []
-    for ch, info in active_recs.items():
-        clean_recs.append({
-            "channel": ch,
-            "pid": info['pid'],
-            "filename": os.path.basename(info['filename'])
-        })
+    try:
+        service_state = load_json(SERVICE_STATE_FILE, {"enabled": False})
+        active_recs = load_json(RECORDINGS_FILE, {})
         
-    return {
-        "service_enabled": service_state.get("enabled", False),
-        "active_recordings": clean_recs,
-        "active_uploads": ACTIVE_UPLOADS
-    }
+        # Clean up zombie records visually
+        clean_recs = []
+        for ch, info in active_recs.items():
+            clean_recs.append({
+                "channel": ch,
+                "pid": info.get('pid'),
+                "filename": os.path.basename(info.get('filename', ''))
+            })
+            
+        return {
+            "service_enabled": service_state.get("enabled", False),
+            "active_recordings": clean_recs,
+            "active_uploads": ACTIVE_UPLOADS
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/api/service/toggle")
 async def toggle_service():
@@ -201,22 +207,27 @@ async def get_channels():
 
 @app.post("/api/channels")
 async def add_channel(payload: dict):
-    channel = payload.get("channel")
-    if not channel: return JSONResponse(status_code=400, content={"error": "Missing channel"})
-    
-    channel = channel.lower().strip()
-    channels = load_json(CHANNELS_FILE, [])
-    
-    # Migrate if needed
-    if channels and isinstance(channels[0], str):
-        channels = [{"name": ch, "active": True} for ch in channels]
+    try:
+        channel = payload.get("channel")
+        if not channel: return JSONResponse(status_code=400, content={"error": "Missing channel"})
+        
+        channel = channel.lower().strip()
+        channels = load_json(CHANNELS_FILE, [])
+        
+        # Migrate if needed
+        if channels and isinstance(channels[0], str):
+            channels = [{"name": ch, "active": True} for ch in channels]
 
-    if not any(c['name'] == channel for c in channels):
-        channels.append({"name": channel, "active": True})
-        save_json(CHANNELS_FILE, channels)
-        return {"status": "added", "channels": channels}
-    
-    return JSONResponse(status_code=409, content={"error": "Channel exists"})
+        if not any(c['name'] == channel for c in channels):
+            channels.append({"name": channel, "active": True})
+            save_json(CHANNELS_FILE, channels)
+            return {"status": "added", "channels": channels}
+        
+        return JSONResponse(status_code=409, content={"error": "Channel exists"})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.delete("/api/channels/{channel_name}")
 async def delete_channel(channel_name: str):
