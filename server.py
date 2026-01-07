@@ -90,44 +90,112 @@ def generate_thumbnail(video_path):
     return None
 
 def get_recordings():
-    search_pattern = os.path.join(DATA_DIR, "rec_*.*")
-    all_files = glob.glob(search_pattern)
-    files = [f for f in all_files if f.lower().endswith(('.mp4', '.ts', '.mkv'))]
-    files.sort(key=os.path.getmtime, reverse=True)
+    # 1. Scan for Folders
+    all_items = os.listdir(DATA_DIR)
+    folders = [d for d in all_items if d.startswith("rec_") and os.path.isdir(os.path.join(DATA_DIR, d))]
+    
+    # 2. Scan for Legacy Files
+    legacy_files = glob.glob(os.path.join(DATA_DIR, "rec_*.*"))
+    legacy_files = [f for f in legacy_files if os.path.isfile(f) and f.lower().endswith(('.mp4', '.ts', '.mkv'))]
     
     result = []
     active_recs = load_json(RECORDINGS_FILE, {})
     
-    for f in files:
-        filename_only = os.path.basename(f)
+    # Process Folders
+    for folder in folders:
+        folder_path = os.path.join(DATA_DIR, folder)
+        meta_path = os.path.join(folder_path, "meta.json")
+        
+        # Load Metadata
+        meta = load_json(meta_path, {})
+        
+        # Find Video File
+        video_file = None
+        video_path = None
+        
+        # Check standard names or scan
+        possible_video = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp4', '.ts', '.mkv'))]
+        if possible_video:
+            video_file = possible_video[0] # Take first valid video
+            video_path = os.path.join(folder_path, video_file)
+        
+        if not video_path:
+            continue # Skip empty folders
+            
+        # Stats
         try:
-            size_mb = os.path.getsize(f) / (1024 * 1024)
+            size_mb = os.path.getsize(video_path) / (1024 * 1024)
+            timestamp = os.path.getmtime(video_path)
+            date_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
         except OSError:
             size_mb = 0
-            
-        timestamp = os.path.getmtime(f)
-        date_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
-        
+            date_str = "Unknown"
+
+        # Check Active
         is_active = False
         for info in active_recs.values():
-            if os.path.abspath(info['filename']) == os.path.abspath(f):
+            # Check by folder name match logic or pid logic
+            if info.get('folder_name') == folder:
                 is_active = True
                 break
         
         # Thumbs
         thumb_url = None
-        if not is_active: # Don't thumb active recordings (file locked/changing)
-            thumb_url = generate_thumbnail(f)
-                
+        if not is_active:
+            thumb_url = generate_thumbnail(video_path)
+
         result.append({
+            "type": "folder",
+            "id": folder, # Unique ID is folder name
+            "filename": folder, # Display name fallback
+            "title": meta.get("title", folder),
+            "game": meta.get("game", ""),
+            "author": meta.get("author", ""),
+            "upload_links": meta.get("upload_links", {}),
+            "path": video_path,
+            "url": f"/files/{folder}/{video_file}",
+            "thumbnail": thumb_url,
+            "size_mb": round(size_mb, 1),
+            "date": date_str,
+            "is_active": is_active
+        })
+
+    # Process Legacy Files
+    for f in legacy_files:
+        filename_only = os.path.basename(f)
+        try:
+            size_mb = os.path.getsize(f) / (1024 * 1024)
+            timestamp = os.path.getmtime(f)
+            date_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
+        except OSError:
+            size_mb = 0
+            date_str = ""
+            
+        is_active = False
+        for info in active_recs.values():
+             if info.get('filename') and os.path.basename(info['filename']) == filename_only:
+                is_active = True
+                break
+        
+        thumb_url = generate_thumbnail(f) if not is_active else None
+        
+        result.append({
+            "type": "legacy",
+            "id": filename_only,
             "filename": filename_only,
-            "path": f, # Absolute path for internal use
+            "title": filename_only,
+            "game": "Legacy",
+            "upload_links": {},
+            "path": f,
             "url": f"/files/{filename_only}",
             "thumbnail": thumb_url,
             "size_mb": round(size_mb, 1),
             "date": date_str,
             "is_active": is_active
         })
+        
+    # Sort by date
+    result.sort(key=lambda x: x['date'], reverse=True)
     return result
 
 # --- Globals for Concurrency ---
@@ -192,21 +260,31 @@ async def stop_recording(channel: str):
 
 @app.delete("/api/recording/{filename}")
 async def delete_recording(filename: str):
-    # Security check: only allow deleting files in static dir
+    # 'filename' here is actually the ID, which is the folder name for new items
+    # or the filename for legacy items.
+    
     safe_name = os.path.basename(filename)
     
     # LOCK CHECK
+    # We need to check if ANY file inside this folder is uploading, or if the folder itself is locked
+    # For now, simplistic check against ID
     if safe_name in ACTIVE_UPLOADS:
         return JSONResponse(status_code=409, content={"error": "File is currently being uploaded. Please wait."})
         
     path = os.path.join(DATA_DIR, safe_name)
+    
     if os.path.exists(path):
         try:
-            os.remove(path)
+            if os.path.isdir(path):
+                import shutil
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
             return {"status": "deleted"}
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
-    return JSONResponse(status_code=404, content={"error": "File not found"})
+            
+    return JSONResponse(status_code=404, content={"error": "File/Folder not found"})
 
 # API: Channels
 @app.get("/api/channels")
@@ -308,7 +386,7 @@ async def update_settings(payload: dict):
 @app.post("/api/upload/archive")
 def upload_archive(payload: dict):
     try:
-        filename = payload.get("filename")
+        filename = payload.get("filename") # ID (folder or file)
         title = payload.get("title")
         if not filename: return JSONResponse(status_code=400, content={"error": "Missing filename"})
         
@@ -318,6 +396,20 @@ def upload_archive(payload: dict):
             return JSONResponse(status_code=409, content={"error": "Already uploading"})
 
         path = os.path.join(DATA_DIR, safe_name)
+        
+        # Resolve actual video path
+        video_path = path
+        meta_path = None
+        
+        if os.path.isdir(path):
+             # Folder logic
+             meta_path = os.path.join(path, "meta.json")
+             # Find video
+             possible = [f for f in os.listdir(path) if f.lower().endswith(('.mp4', '.ts', '.mkv'))]
+             if not possible:
+                  return JSONResponse(status_code=404, content={"error": "No video file found in folder"})
+             video_path = os.path.join(path, possible[0])
+        
         
         # LOCK
         ACTIVE_UPLOADS[safe_name] = {"target": "Archive.org", "progress": 0, "status": "starting"}
@@ -340,10 +432,21 @@ def upload_archive(payload: dict):
             settings = settings_manager.load_settings()
             uploader = uploader_service.UploaderService(settings)
             
-            success, msg = uploader.upload_to_archive(path, metadata={'title': title, 'mediatype': 'movies'}, progress_callback=prog_cb)
+            success, msg = uploader.upload_to_archive(video_path, metadata={'title': title, 'mediatype': 'movies'}, progress_callback=prog_cb)
             
             if success:
                 print("\nUpload Complete!")
+                
+                # Save Link if folder
+                if meta_path:
+                    meta = load_json(meta_path, {})
+                    if "upload_links" not in meta: meta["upload_links"] = {}
+                    # Extract URL from msg or assume
+                    # Msg is usually "Uploaded to URL"
+                    url_part = msg.split("Uploaded to ")[-1]
+                    meta["upload_links"]["archive"] = url_part
+                    save_json(meta_path, meta)
+                
                 return {"status": "success", "message": msg}
             else:
                 print(f"\nUpload Failed: {msg}")
@@ -360,7 +463,7 @@ def upload_archive(payload: dict):
 @app.post("/api/upload/youtube")
 def upload_youtube(payload: dict):
     try:
-        filename = payload.get("filename")
+        filename = payload.get("filename") # This is ID
         title = payload.get("title")
         description = payload.get("description", "")
         privacy = payload.get("privacy", "private")
@@ -373,6 +476,17 @@ def upload_youtube(payload: dict):
             return JSONResponse(status_code=409, content={"error": "Already uploading"})
 
         path = os.path.join(DATA_DIR, safe_name)
+        
+        # Resolve actual video path
+        video_path = path
+        meta_path = None
+        
+        if os.path.isdir(path):
+             meta_path = os.path.join(path, "meta.json")
+             possible = [f for f in os.listdir(path) if f.lower().endswith(('.mp4', '.ts', '.mkv'))]
+             if not possible:
+                  return JSONResponse(status_code=404, content={"error": "No video file found in folder"})
+             video_path = os.path.join(path, possible[0])
         
         # LOCK
         ACTIVE_UPLOADS[safe_name] = {"target": "YouTube", "progress": 0, "status": "starting"}
@@ -394,10 +508,21 @@ def upload_youtube(payload: dict):
             settings = settings_manager.load_settings()
             uploader = uploader_service.UploaderService(settings)
             
-            success, msg = uploader.upload_to_youtube(path, title=title, description=description, privacy_status=privacy, progress_callback=prog_cb)
+            success, msg = uploader.upload_to_youtube(video_path, title=title, description=description, privacy_status=privacy, progress_callback=prog_cb)
             
             if success:
                 print("\nUpload Complete!")
+                
+                # Save Link if folder
+                if meta_path:
+                    meta = load_json(meta_path, {})
+                    if "upload_links" not in meta: meta["upload_links"] = {}
+                    # Extract ID from msg "Uploaded to YouTube! Video ID: ..."
+                    if "Video ID: " in msg:
+                        vid_id = msg.split("Video ID: ")[-1]
+                        meta["upload_links"]["youtube"] = f"https://youtu.be/{vid_id}"
+                        save_json(meta_path, meta)
+
                 return {"status": "success", "message": msg}
             else:
                 print(f"\nUpload Failed: {msg}")
@@ -421,6 +546,7 @@ async def init_youtube_auth(payload: dict):
     client_secrets = payload.get("client_secrets")
     # HARDCODED FOR PRODUCTION as requested
     redirect_uri = "https://gravador.quimerastudio.com.br/auth/callback" 
+    print(f"DEBUG_AUTH: Initiating flow with redirect_uri={redirect_uri}", flush=True)
     
     settings = settings_manager.load_settings()
     uploader = uploader_service.UploaderService(settings)

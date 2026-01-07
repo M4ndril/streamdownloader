@@ -81,14 +81,56 @@ def main():
                         # Check stream availability
                         streams = streamlink.streams(url)
                         if streams:
-                            print(f"Channel {channel} is ONLINE. Starting recording...")
+                            print(f"Channel {channel} is ONLINE. Fetching metadata...")
+                            
+                            # 1. Fetch Metadata (streamlink --jsonURL)
+                            meta_info = {}
+                            try:
+                                json_cmd = [sys.executable, "-m", "streamlink", "--json", url]
+                                res = subprocess.run(json_cmd, capture_output=True, text=True, timeout=15)
+                                if res.returncode == 0:
+                                    import json as std_json
+                                    data = std_json.loads(res.stdout)
+                                    # Streamlink JSON output has a 'streams' key usually, or just general info
+                                    # We usually want the 'title' and 'game' (category) from the first stream logic or 'metadata'
+                                    # Actual output depends on plugin, but usually: 
+                                    # { "streams": { "best": { ... } }, "metadata": { "title": "...", "id": "...", "author": "..." } }
+                                    # OR for Twitch it might be directly in plugin payload. 
+                                    # Let's try to extract safely.
+                                    if "metadata" in data and data["metadata"]:
+                                         meta_info["title"] = data["metadata"].get("title", "No Title")
+                                         meta_info["game"] = data["metadata"].get("game", "Unknown Game")
+                                         meta_info["author"] = data["metadata"].get("author", channel)
+                                    else:
+                                        # Fallback
+                                        meta_info["title"] = "Unknown Title"
+                                        meta_info["game"] = "Unknown Game"
+                            except Exception as e:
+                                print(f"Metadata fetch failed: {e}")
+                                meta_info = {"title": "Error fetching title", "game": "Unknown"}
+
+                            print(f"Starting recording for {channel}...")
                             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                             
-                            rec_format = settings.get("recording_format", "mp4")
-                            filename = os.path.join(DATA_DIR, f"rec_{channel}_{timestamp}.{rec_format}")
-
+                            # 2. Create Directory
+                            rec_folder_name = f"rec_{channel}_{timestamp}"
+                            rec_folder_path = os.path.join(DATA_DIR, rec_folder_name)
+                            os.makedirs(rec_folder_path, exist_ok=True)
                             
-                            cmd = [sys.executable, "-m", "streamlink", url, "best", "-o", filename]
+                            rec_format = settings.get("recording_format", "mp4")
+                            # We keep simple filename inside the folder
+                            filename_rel = f"video.{rec_format}" 
+                            filename_abs = os.path.join(rec_folder_path, filename_rel)
+
+                            # 3. Save Metadata
+                            meta_file = os.path.join(rec_folder_path, "meta.json")
+                            meta_info["channel"] = channel
+                            meta_info["start_time"] = timestamp
+                            meta_info["format"] = rec_format
+                            save_json(meta_file, meta_info)
+
+                            # 4. Start Recording
+                            cmd = [sys.executable, "-m", "streamlink", url, "best", "-o", filename_abs]
                             
                             kwargs = {}
                             if sys.platform == "win32":
@@ -103,13 +145,15 @@ def main():
                             )
                             
                             # Update tracking
+                            # Record the FOLDER name as the ID/Key mostly, but for compat we track the path/pid
                             active_recs[channel] = {
                                 "pid": proc.pid,
-                                "filename": filename,
+                                "folder_name": rec_folder_name,
+                                "filename": filename_abs, # Keep full path for legacy compat/checking
                                 "start_time": timestamp
                             }
                             save_json(RECORDINGS_FILE, active_recs)
-                            print(f"Started recording {channel} (PID {proc.pid})")
+                            print(f"Started recording {channel} (PID {proc.pid}) in {rec_folder_name}")
                             
                     except streamlink.PluginError:
                         pass # Channel offline or invalid

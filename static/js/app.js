@@ -201,6 +201,17 @@ async function refreshRecordings() {
     grid.innerHTML = data.map(rec => {
         let actionHtml = '';
         let statusHtml = '';
+        let linksHtml = '';
+
+        // Handle uploaded Links
+        if (rec.upload_links) {
+            if (rec.upload_links.youtube) {
+                linksHtml += `<a href="${rec.upload_links.youtube}" target="_blank" class="upload-link-btn yt" title="Ver no YouTube"><i data-lucide="youtube"></i></a>`;
+            }
+            if (rec.upload_links.archive) {
+                linksHtml += `<a href="${rec.upload_links.archive}" target="_blank" class="upload-link-btn arc" title="Ver no Archive.org"><i data-lucide="library"></i></a>`;
+            }
+        }
 
         if (rec.upload_status) {
             // UPLOADING
@@ -223,31 +234,44 @@ async function refreshRecordings() {
             `;
             actionHtml = `
                 <a href="${rec.url}" download class="btn-icon"><i data-lucide="download"></i></a>
-                <button class="btn-icon" disabled title="Upload em andamento"><i data-lucide="upload-cloud"></i></button>
-                <button class="btn-icon" disabled title="Aguarde o upload terminar"><i data-lucide="trash"></i></button>
+                <button class="btn-icon" disabled><i data-lucide="upload-cloud"></i></button>
+                <button class="btn-icon" disabled><i data-lucide="trash"></i></button>
             `;
         } else {
             // NORMAL
+            // Pass the ID (which might be a folder name now) to the delete/upload functions
+            const safeId = rec.id || rec.filename;
+
             actionHtml = `
-                <a href="${rec.url}" download class="btn-icon"><i data-lucide="download"></i></a>
-                <button class="btn-icon" onclick="openUploadModal('${rec.filename}')"><i data-lucide="upload-cloud"></i></button>
-                <button class="btn-icon" onclick="deleteRec('${rec.filename}')"><i data-lucide="trash"></i></button>
+                <a href="${rec.url}" download class="btn-icon" title="Baixar Video"><i data-lucide="download"></i></a>
+                <button class="btn-icon" onclick="openUploadModal('${safeId}')" title="Enviar para Nuvem"><i data-lucide="upload-cloud"></i></button>
+                <button class="btn-icon" onclick="deleteRec('${safeId}')" title="Excluir"><i data-lucide="trash"></i></button>
             `;
         }
+
+        // Metadata Display
+        const displayTitle = rec.title && rec.title !== rec.filename ? rec.title : rec.filename;
+        const displayGame = rec.game || "";
+        const displayDate = rec.date;
 
         return `
         <div class="rec-card ${rec.is_active ? 'recording' : ''}">
             <div class="rec-thumb-container">
                 ${rec.thumbnail
-                ? `<img src="${rec.thumbnail}" class="rec-thumb-img" loading="lazy" alt="${rec.filename}">`
+                ? `<img src="${rec.thumbnail}" class="rec-thumb-img" loading="lazy" alt="${displayTitle}">`
                 : `<div class="rec-icon-placeholder"><i data-lucide="video" style="width:48px; height:48px;"></i></div>`
             }
             </div>
             <div class="rec-info">
-                <div class="rec-title" title="${rec.filename}">${rec.filename}</div>
+                <div class="rec-title" title="${displayTitle}">${displayTitle}</div>
+                ${displayGame ? `<div class="rec-game"><i data-lucide="gamepad-2" size="14"></i> ${displayGame}</div>` : ''}
                 <div class="rec-meta">
                     <span>${rec.size_mb} MB</span>
-                    <span>${rec.date}</span>
+                    <span>${displayDate}</span>
+                </div>
+                
+                <div class="rec-links">
+                   ${linksHtml}
                 </div>
             </div>
             ${statusHtml}
